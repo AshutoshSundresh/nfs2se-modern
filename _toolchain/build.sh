@@ -36,4 +36,9 @@ echo "== post-build: tyre particle effects (smoke/dust/snow) =="
 # newly-assembled asm) before applying the particle bytes.
 rm -f "$OUT.partbak"
 python "$SRC/../../mods/particles/patch_particles.py" apply --exe "$OUT" || echo "WARN: particles patch failed"
+echo "== post-build: McLaren F1 35 factory colours =="
+# fresh build is the baseline; drop stale .mcbak so the backup reflects THIS build's
+# pre-patch bytes (the patch never restores it, but keep it consistent with .partbak).
+rm -f "$OUT.mcbak"
+python "$SRC/../../mods/mclaren-colors/patch_mclaren_colors.py" apply --exe "$OUT" || echo "WARN: mclaren-colours patch failed"
 echo "== DONE: $(stat -c %s "$OUT" 2>/dev/null) bytes =="
