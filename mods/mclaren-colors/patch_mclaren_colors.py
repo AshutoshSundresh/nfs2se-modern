@@ -79,6 +79,10 @@ NEW_COUNT = len(MCLAREN_PAINTS)   # 35
 # Ferrari F355 (carType 2): 20 factory paints baked into mclaren_ext_palette[124..143].
 F355_BASE  = NEW_BASE + NEW_COUNT  # 89 + 35 = 124
 F355_COUNT = 20
+# Mustang Mach III (carType 5): trimmed from 4 stock colours to just 2 (Hot Poppy, Jungle Green
+# Pearl), which overwrite its first two in-place palette slots 56..57 (set in mclaren_palette.c).
+MACH_BASE  = 56
+MACH_COUNT = 2
 
 def hex_to_hsv255(hx):
     r = int(hx[0:2], 16)/255.0; g = int(hx[2:4], 16)/255.0; b = int(hx[4:6], 16)/255.0
@@ -227,6 +231,10 @@ def apply(path: Path):
     F355 = 2
     d[tbl + F355*2]     = F355_BASE   # 124
     d[tbl + F355*2 + 1] = F355_COUNT  # 20
+    # Mustang Mach III (carType 5): keep base slot 56, trim count 4 -> 2 (slots 56..57 reskinned).
+    MACH = 5
+    d[tbl + MACH*2]     = MACH_BASE   # 56
+    d[tbl + MACH*2 + 1] = MACH_COUNT  # 2
     # 3) relocate the 89-entry minimap colour table to the 124-slot writable global and
     #    bump its builder loop so slots 89..123 are covered (fixes black/absent minimap dots
     #    and the OOB that crashed the 2nd race when the field is McLarens).
