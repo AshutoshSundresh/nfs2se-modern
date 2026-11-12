@@ -28,8 +28,10 @@ ld --enable-stdcall-fixup -o "$OUT" -Map="$GAMEDIR/nfs2se-modern.map" *.o \
    -lws2_32 -lwinmm -lmingwex -lmsvcrt -lkernel32 -lopengl32 -lSDL2 \
    -subsystem=windows -s -e _start
 rm -f *.o
-echo "== post-build: FZR 2000 colour palette =="
-python "$SRC/../../mods/fzr-colors/patch_fzr_colors.py" apply --exe "$OUT" || echo "WARN: fzr-colours patch failed"
+# == RETIRED: FZR 2000 colour palette (mods/fzr-colors) ==
+# Superseded by the McLaren patch, which repoints the FZR 2000's real player-picker table entry
+# (0x4ADD2F car14) to the Isdera Commendatore's palette slots 72..76. The old fzr-colors patch only
+# reskinned garage-black slot 88, which the FZR no longer uses, so it is no longer run.
 echo "== post-build: tyre particle effects (smoke/dust/snow) =="
 # The freshly-linked exe IS the baseline, so drop any stale cross-build .partbak first --
 # otherwise patch_particles.py would restore the old backup over this build (clobbering the

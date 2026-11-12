@@ -235,6 +235,12 @@ def apply(path: Path):
     MACH = 5
     d[tbl + MACH*2]     = MACH_BASE   # 56
     d[tbl + MACH*2 + 1] = MACH_COUNT  # 2
+    # FZR 2000 (carType 14 / FUTR): its PLAYER garage picker (stock {87,2}) is repointed at the
+    # Isdera Commendatore's palette range (slots 72..76) so the FZR offers ALL of the Isdera's
+    # colours. We copy the Isdera's live base/count from the table so the two stay in lockstep.
+    FZR = 14; ISDE = 11
+    d[tbl + FZR*2]     = d[tbl + ISDE*2]       # base  -> 72
+    d[tbl + FZR*2 + 1] = d[tbl + ISDE*2 + 1]   # count -> 5
     # 3) relocate the 89-entry minimap colour table to the 124-slot writable global and
     #    bump its builder loop so slots 89..123 are covered (fixes black/absent minimap dots
     #    and the OOB that crashed the 2nd race when the field is McLarens).
