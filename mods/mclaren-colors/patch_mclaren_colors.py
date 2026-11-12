@@ -160,6 +160,12 @@ def apply(path: Path):
     tbl = v2f(d, TABLE_VA)
     d[tbl + MCLAREN*2] = NEW_BASE
     d[tbl + MCLAREN*2 + 1] = NEW_COUNT
+    # Ford GT90 (carType 3): FORCED single colour -> count 6->0 (same as the stock forced cars
+    # Indigo/Bomber/Tombstone, so the garage shows no paint selector). Base stays slot 66, which
+    # the car-load init copies into the live colour slot, so the model renders #F1F1EF (set in
+    # mclaren_palette.c). Slot 66 is GT90-only; slots 67..71 become unused.
+    GT90 = 3
+    d[tbl + GT90*2 + 1] = 0
     # 3) relocate the 89-entry minimap colour table to the 124-slot writable global and
     #    bump its builder loop so slots 89..123 are covered (fixes black/absent minimap dots
     #    and the OOB that crashed the 2nd race when the field is McLarens).
