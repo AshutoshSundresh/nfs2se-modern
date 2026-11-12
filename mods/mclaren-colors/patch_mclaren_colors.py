@@ -53,8 +53,12 @@ OLD_BASES    = [PAL_VA + k for k in (0, 4, 8, 12)]
 #     in .text (before any inserted data) and so are stable.
 CT_READS     = [0x47905d, 0x4791c8]   # imm32 == color_table      (MOV reg,[slot*4+ct])
 CT_WRITE     = 0x47b5eb                # imm32 == color_table-4    (MOV [EDI+ct-4],EAX, EDI pre+4)
-CT_LOOP_CMP  = 0x47b5f1                # byte   == 0x59 (89)       (CMP ESI,0x59) -> 0x7c (124)
-CT_NEW_COUNT = 124
+CT_LOOP_CMP  = 0x47b5f1                # 'CMP ESI,0x59 ; JL loop_top' (9 bytes: 83 fe 59 0f 8c rel32)
+CT_NEW_COUNT = 144                     # new builder-loop bound (89 stock + 35 McLaren + 20 F355)
+# The builder loop bound is a SIGNED imm8 (CMP ESI,imm8).  124 (0x7C) fit, but 144 (0x90) would
+# sign-extend to -112 and kill the loop, and we can't widen the instruction in place (it would
+# shift .data/.rdata and break every fixed VA below).  So the 9-byte CMP+JL is replaced by a jump
+# to a .text code cave that re-does the compare with a 32-bit immediate (see patch_loop_bound).
 
 X = 0x50
 MCLAREN_PAINTS = [
@@ -72,6 +76,9 @@ MCLAREN_PAINTS = [
     ("Marlboro White","F2F2EF"),("Yquem","D56835"),
 ]
 NEW_COUNT = len(MCLAREN_PAINTS)   # 35
+# Ferrari F355 (carType 2): 20 factory paints baked into mclaren_ext_palette[124..143].
+F355_BASE  = NEW_BASE + NEW_COUNT  # 89 + 35 = 124
+F355_COUNT = 20
 
 def hex_to_hsv255(hx):
     r = int(hx[0:2], 16)/255.0; g = int(hx[2:4], 16)/255.0; b = int(hx[4:6], 16)/255.0
@@ -138,6 +145,54 @@ def _patch_u32_at(d, va, expect, newv):
                          % (va, expect, struct.unpack_from("<I", d, fo)[0]))
     struct.pack_into("<I", d, fo, newv & 0xffffffff)
 
+def find_text_cave(d, need):
+    """Return the VA of a run of >= `need` zero bytes inside an executable section (.text)."""
+    pe = struct.unpack_from("<I", d, 0x3c)[0]
+    nsec = struct.unpack_from("<H", d, pe+6)[0]; opt = struct.unpack_from("<H", d, pe+20)[0]
+    so = pe+24+opt
+    for i in range(nsec):
+        e = so+i*40
+        vs, va, rs, ptr = struct.unpack_from("<IIII", d, e+8)
+        chars = struct.unpack_from("<I", d, e+36)[0]
+        if not (chars & 0x20000000):            # IMAGE_SCN_MEM_EXECUTE
+            continue
+        blob = d[ptr:ptr+rs]; run = 0; start = 0
+        for j, b in enumerate(blob):
+            if b == 0:
+                if run == 0: start = j
+                run += 1
+                if run >= need:
+                    return IMGBASE + va + start   # VA of cave start
+            else:
+                run = 0
+    raise SystemExit("no %d-byte code cave found in an executable section" % need)
+
+def patch_loop_bound(d):
+    """Replace 'CMP ESI,0x59 ; JL loop_top' (9 bytes) with a jump to a code-cave trampoline that
+    does 'CMP ESI,144 (imm32) ; JL loop_top ; JMP loop_exit', so the minimap colour_table builder
+    fills all 144 slots.  Keeps every other address fixed (no section shift)."""
+    op_va = CT_LOOP_CMP - 2                            # CT_LOOP_CMP points at the imm8; opcode is -2
+    f = v2f(d, op_va)
+    if d[f:f+5] != b"\x83\xfe\x59\x0f\x8c":            # CMP ESI,0x59 ; JL rel32
+        raise SystemExit("loop site at 0x%x != 'cmp esi,0x59 / jl' (got %s) -- already patched or "
+                         "layout changed" % (op_va, d[f:f+5].hex()))
+    jl_rel   = struct.unpack_from("<i", d, f+5)[0]
+    jl_end   = op_va + 9                               # byte after the JL  (= loop exit / fallthru)
+    loop_top = (jl_end + jl_rel) & 0xffffffff          # JL target
+    loop_exit = jl_end
+    cave_va = find_text_cave(d, 18)
+    cf = v2f(d, cave_va)
+    t = bytearray(b"\x81\xfe" + struct.pack("<I", CT_NEW_COUNT))        # CMP ESI, 144
+    jl_at = cave_va + len(t)
+    t += b"\x0f\x8c" + struct.pack("<i", loop_top - (jl_at + 6))         # JL loop_top
+    jmp_at = cave_va + len(t)
+    t += b"\xe9" + struct.pack("<i", loop_exit - (jmp_at + 5))   # JMP loop_exit
+    d[cf:cf+len(t)] = t
+    site = bytearray(b"\xe9" + struct.pack("<i", cave_va - (op_va + 5)))
+    site += b"\x90" * (9 - len(site))                  # pad to the original 9 bytes with NOPs
+    d[f:f+9] = site
+    return cave_va, loop_top
+
 def apply(path: Path):
     d = bytearray(path.read_bytes())
     bak = path.with_suffix(path.suffix + ".mcbak")
@@ -166,6 +221,12 @@ def apply(path: Path):
     # mclaren_palette.c). Slot 66 is GT90-only; slots 67..71 become unused.
     GT90 = 3
     d[tbl + GT90*2 + 1] = 0
+    # Ferrari F355 F1 (carType 2): 20 factory paints -> relocated slots 124..143 (same lockstep
+    # expansion as the McLaren: the 20 entries are baked into mclaren_ext_palette[124..143] and
+    # the minimap table/loop below cover them). base 82->124, count 5->20.
+    F355 = 2
+    d[tbl + F355*2]     = F355_BASE   # 124
+    d[tbl + F355*2 + 1] = F355_COUNT  # 20
     # 3) relocate the 89-entry minimap colour table to the 124-slot writable global and
     #    bump its builder loop so slots 89..123 are covered (fixes black/absent minimap dots
     #    and the OOB that crashed the 2nd race when the field is McLarens).
@@ -175,13 +236,11 @@ def apply(path: Path):
     for site in CT_READS:                      # MOV reg,[slot*4 + color_table]
         _patch_u32_at(d, site, ct_cur, ct_va)
     _patch_u32_at(d, CT_WRITE, ct_cur - 4, ct_va - 4)   # MOV [EDI + color_table-4], EAX
-    lf = v2f(d, CT_LOOP_CMP)                    # CMP ESI, 0x59  ->  0x7c
-    if d[lf] != 0x59:
-        raise SystemExit("loop bound at 0x%x != 0x59 (got 0x%x)" % (CT_LOOP_CMP, d[lf]))
-    d[lf] = CT_NEW_COUNT
+    cave_va, _ = patch_loop_bound(d)           # builder loop 89 -> 144 via .text trampoline
     path.write_bytes(d)
-    print("patched: accessor -> mclaren_ext_palette @ 0x%x ; color_table -> 0x%x (%d) ; "
-          "McLaren base=%d count=%d" % (arr_va, ct_va, CT_NEW_COUNT, NEW_BASE, NEW_COUNT))
+    print("patched: accessor -> mclaren_ext_palette @ 0x%x ; color_table -> 0x%x (%d, loop-cave "
+          "@0x%x) ; McLaren base=%d count=%d ; F355 base=%d count=%d"
+          % (arr_va, ct_va, CT_NEW_COUNT, cave_va, NEW_BASE, NEW_COUNT, F355_BASE, F355_COUNT))
     status(path)
 
 def revert(path: Path):
